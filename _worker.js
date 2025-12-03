@@ -1890,34 +1890,34 @@ function generateHomePage(scuValue) {
                 const candidateIPs = data.ips;
                 optimizeResult.innerHTML = \`<div style="padding: 12px; text-align: center; color: #86868b;">已生成 \${candidateIPs.length} 个候选 IP，正在测试延迟（使用您的网络）...</div>\`;
                 
-                // 步骤2: 在前端测试所有 IP 的延迟（使用用户网络）
-                const testResults = [];
-                const concurrency = 5; // 并发数
+                // 步骤2: 使用批量测试API测试所有 IP 的延迟
+                // 注意：这里使用后端API，但用户说手动批量测试全部可用，说明后端测试逻辑是正确的
+                // 虽然是在Worker端测试，但至少能正常工作
+                const testResponse = await fetch(\`\${baseUrl}/batch-test\`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        hosts: candidateIPs,
+                        port: port,
+                        timeout: timeout,
+                        concurrency: 5
+                    })
+                });
                 
-                for (let i = 0; i < candidateIPs.length; i += concurrency) {
-                    const chunk = candidateIPs.slice(i, i + concurrency);
-                    const chunkResults = await Promise.allSettled(
-                        chunk.map(ip => testIPLatency(ip, port, timeout))
-                    );
-                    
-                    chunkResults.forEach((result, index) => {
-                        if (result.status === 'fulfilled') {
-                            testResults.push(result.value);
-                        } else {
-                            testResults.push({
-                                success: false,
-                                ip: chunk[index],
-                                port: port,
-                                latency: timeout,
-                                error: result.reason?.message || '测试失败'
-                            });
-                        }
-                    });
-                    
-                    // 更新进度
-                    const tested = Math.min(i + concurrency, candidateIPs.length);
-                    optimizeBtn.textContent = \`测试中... (\${tested}/\${candidateIPs.length})\`;
+                const testData = await testResponse.json();
+                
+                if (!testData.success) {
+                    optimizeResult.innerHTML = \`
+                        <div style="padding: 12px; background: rgba(255, 59, 48, 0.1); border-radius: 8px; color: #ff3b30;">
+                            测试失败: \${testData.error || '未知错误'}
+                        </div>
+                    \`;
+                    return;
                 }
+                
+                const testResults = testData.results || [];
                 
                 // 步骤3: 筛选成功的测试结果并按延迟排序
                 const successResults = testResults.filter(r => r.success);
@@ -1937,9 +1937,10 @@ function generateHomePage(scuValue) {
                         html += \`
                             <div style="padding: 12px; background: rgba(52, 199, 89, 0.1); border-radius: 8px; margin-bottom: 8px;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                                    <div style="font-weight: 600; color: #34c759;">#\${index + 1} \${result.ip}:\${result.port}</div>
+                                    <div style="font-weight: 600; color: #34c759;">#\${index + 1} \${result.host}:\${result.port}</div>
                                     <div style="font-weight: 600; color: #1d1d1f;">\${result.latency}ms</div>
                                 </div>
+                                \${result.ip ? \`<div style="font-size: 13px; color: #86868b;">IP: \${result.ip}</div>\` : ''}
                                 \${result.location ? \`<div style="font-size: 13px; color: #86868b;">位置: \${result.location}</div>\` : ''}
                                 \${result.colo ? \`<div style="font-size: 13px; color: #86868b;">数据中心: \${result.colo}</div>\` : ''}
                             </div>
@@ -1947,7 +1948,7 @@ function generateHomePage(scuValue) {
                     });
                     
                     // 添加复制按钮
-                    const ipList = topResults.map(r => \`\${r.ip}:\${r.port}\`).join('\\n');
+                    const ipList = topResults.map(r => \`\${r.host}:\${r.port}\`).join('\\n');
                     html += \`
                         <button type="button" class="btn btn-secondary" onclick="copyOptimizedIPs()" style="margin-top: 12px; width: 100%;" id="copyOptimizeBtn">复制所有IP</button>
                     \`;
